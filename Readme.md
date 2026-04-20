@@ -44,7 +44,7 @@ Designed to demonstrate multi‑modality, fusion strategies (Reciprocal Rank Fus
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/multi-modal-rag.git
+git clone https://github.com/DeepeshAlwani/multi-modal-rag.git
 cd multi-modal-rag
 
 # Create virtual environment (optional but recommended)
@@ -111,7 +111,7 @@ Sources:
 │   ├── auth.py
 │   ├── payment.py
 │   ├── utils.py
-│   └── payment_flow_fixed.png
+├── payment_flow_fixed.png
 ├── chroma_db/              # Persistent vector DB (gitignored)
 └── requirements.txt
 ```
