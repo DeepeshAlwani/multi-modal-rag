@@ -2,85 +2,86 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 import os
 import sys
+from parse_functions import parse_diagram_image, parse_documents
 
-# Import your parsing result from the previous step
-# Option A: If parse_functions.py exports all_functions, you can import it.
-# For now, we'll assume you copy-paste the output list manually or run this after.
-# To keep it self-contained, I'll show a placeholder that you replace with your actual list.
-
-# Placeholder: Replace this with your actual all_functions list from parsing.
-# Example:
-
-all_functions = [
-    {'name': 'verify_user', 'docstring': 'Mock token verification.', 'file': 'test_repo\\auth.py', 'lines': (5, 7)},
-    {'name': 'get_user_role', 'docstring': 'Return role for a valid token.', 'file': 'test_repo\\auth.py', 'lines': (9, 13)},
-    {'name': 'validate_card', 'docstring': 'Simulate card validation.\nReturns True if card number length is 16 and expiry not empty.', 'file': 'test_repo\\payment.py', 'lines': (5, 12)},
-    {'name': 'process_payment', 'docstring': 'Process a payment after card validation.', 'file': 'test_repo\\payment.py', 'lines': (14, 21)},
-    {'name': 'format_currency', 'docstring': 'Return amount as USD string.', 'file': 'test_repo\\utils.py', 'lines': (5, 7)},
-    {'name': 'log_transaction', 'docstring': 'Print log (mock logging).', 'file': 'test_repo\\utils.py', 'lines': (9, 11)},
-]
-
-def index_exists():
+def index_exists(collection_name):
     client = chromadb.PersistentClient(path="./chroma_db")
     try:
-        client.get_collection("code_functions")
+        client.get_collection(collection_name)
         return True
     except:
         return False
 
-def build_index(all_functions):
-    # 1. Initialize embedding model (CPU; 384-dim vectors)
+def build_index(documents, collection_name="code_functions"):
+    """Build index from list of document dicts."""
     print("Loading embedding model...")
     model = SentenceTransformer('all-MiniLM-L6-v2')
-    
-    # 2. Connect to persistent ChromaDB (saves to ./chroma_db)
     client = chromadb.PersistentClient(path="./chroma_db")
-
-    # 3. Delete existing collection if you want a fresh rebuild (optional)
+    
+    # Delete existing collection if it exists (for fresh rebuild)
     try:
-        client.delete_collection("code_functions")
-        print("Deleted existing collection 'code_functions'")
+        client.delete_collection(collection_name)
+        print(f"Deleted existing collection '{collection_name}'")
     except:
-        pass  # collection didn't exist
+        pass
     
-    # 4. Create a new collection
-    collection = client.create_collection("code_functions")
-    print("Created new collection 'code_functions'")
+    collection = client.create_collection(collection_name)
+    print(f"Created new collection '{collection_name}'")
     
-    # 5. Prepare documents from all_functions
-    documents = []
     ids = []
+    documents_list = []
     metadatas = []
-    contents = []   # we'll store the raw text for reference, but not needed for ChromaDB if we use documents
     
-    for func in all_functions:
-        print(func)
-        content = f"File: {func['file']}\nFunction: {func['name']}\nDocstring: {func['docstring']}"
-        doc_id = f"{func['file']}_{func['name']}"
-        metadata = {
-            "file": func['file'],
-            "function": func['name'],
-            "lines": str(func['lines'])   # ChromaDB metadata values must be strings, ints, floats, or bools
-        }
+    for doc in documents:
+        # If the document already has an 'id' field, use it as is (e.g., diagram)
+        if 'id' in doc:
+            doc_id = doc['id']
+            content = doc['content']
+            metadata = doc.get('metadata', {})
+        else:
+            # Assume it's a raw function dictionary from parse_documents
+            # Build a proper document structure
+            doc_id = f"{doc['file']}::{doc['name']}"
+            # Create a descriptive content for embedding
+            content = f"Function name: {doc['name']}\nDocstring: {doc['docstring']}\nFile: {doc['file']}\nLines: {doc['lines']}"
+            metadata = {
+                "file": doc['file'],
+                "function": doc['name'],
+                "lines": doc['lines']
+            }
+        
+        # Ensure metadata values are strings/numbers/bools (convert tuples to strings)
+        for k, v in metadata.items():
+            if isinstance(v, tuple):
+                metadata[k] = str(v)
+        
         ids.append(doc_id)
-        documents.append(content)
+        documents_list.append(content)
         metadatas.append(metadata)
     
-    # 6. Generate embeddings for all contents (in batch for speed)
-    print(f"Generating embeddings for {len(documents)} functions...")
-    embeddings = model.encode(documents).tolist()   # list of lists
+    print(f"Generating embeddings for {len(documents_list)} items...")
+    embeddings = model.encode(documents_list).tolist()
     
-    # 7. Add to ChromaDB
     collection.add(
         ids=ids,
         embeddings=embeddings,
-        documents=documents,
+        documents=documents_list,
         metadatas=metadatas
     )
-    print(f"Successfully indexed {len(documents)} functions.")
-    
-    # Optional: verify count
+    print(f"Successfully indexed {len(documents_list)} items into '{collection_name}'.")
     print(f"Total documents in collection: {collection.count()}")
 
-if __name__ == "__main__":
-    build_index(all_functions)
+def build_all_indexes(folder_path="test_repo", diagram_file="payment_flow_fixed.png"):
+    # 1. Index code functions
+    functions = parse_documents(folder_path)
+    if functions:
+        build_index(documents=functions, collection_name="code_functions")
+    else:
+        print("No Python functions found.")
+    
+    # 2. Index diagram (optional, comment out if OCR not ready)
+    diagram_docs = parse_diagram_image(diagram_file)
+    if diagram_docs:
+        build_index(diagram_docs, collection_name="diagrams")
+    else:
+        print("No diagram found or OCR failed.")

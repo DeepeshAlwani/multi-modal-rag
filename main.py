@@ -1,20 +1,22 @@
 import sys
-from parse_functions import parse_documents
-from build_index import build_index, index_exists
+from build_index import build_all_indexes, index_exists
 from query_engine import run_query
 
-def main() -> None:
+def main():
     if "--rebuild" in sys.argv:
         print("Rebuilding index...")
-        documents = parse_documents("test_repo")
-        build_index(documents)
-    elif not index_exists():
+        build_all_indexes("test_repo", "payment_flow_fixed.png")
+    elif not index_exists("code_functions"):
         print("No index found. Building automatically...")
-        documents = parse_documents("test_repo")
-        build_index(documents)
+        build_all_indexes("test_repo", "payment_flow_fixed.png")
     else:
         print("Using existing index.")
-run_query()
+    
+    # Only run query if index exists (or after building)
+    if index_exists("code_functions"):
+        run_query()
+    else:
+        print("Failed to build index. Exiting.")
 
 if __name__ == "__main__":
     main()
