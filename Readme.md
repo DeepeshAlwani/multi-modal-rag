@@ -148,7 +148,7 @@ For major changes, please open an issue first to discuss what you would like to 
 
 ## 📄 License
 
-Distributed under the MIT License. See `LICENSE` file for more information (you can add a standard MIT license file).  
+Distributed under the MIT License.  
 You are free to use, modify, and distribute this software for any purpose, with attribution.
 
 ## 🙏 Acknowledgements
