@@ -1,0 +1,4 @@
+chromadb==1.5.8
+easyocr==1.7.2
+Requests==2.33.1
+sentence_transformers==5.4.1
