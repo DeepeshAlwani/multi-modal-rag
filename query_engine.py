@@ -85,7 +85,7 @@ Answer:"""
         
         # Use the model you have (change to 'llama3.2:3b' if needed)
         resp = requests.post("http://localhost:11434/api/generate",
-                             json={"model": "gemma4:e2b", "prompt": prompt, "stream": False})
+                             json={"model": "gemma4:e4b", "prompt": prompt, "stream": False})
         answer = resp.json()['response']
         
         print(f"\nAnswer: {answer}\nSources:")

@@ -1,0 +1,54 @@
+{
+  "queries": [
+    {
+      "question": "What does validate_card function do?",
+      "ground_truth": "Validates card number length is 16 and expiry is not empty",
+      "context_required": ["payment.py", "validate_card"]
+    },
+    {
+      "question": "According to the diagram, what happens after 'Card valid?' if answer is NO?",
+      "ground_truth": "Return failed then End",
+      "context_required": ["payment_flow_fixed.png"]
+    },
+    {
+      "question": "Which function calls validate_card?",
+      "ground_truth": "process_payment",
+      "context_required": ["payment.py"]
+    },
+    {
+      "question": "Does the diagram show any logging step?",
+      "ground_truth": "No",
+      "context_required": ["payment_flow_fixed.png"]
+    },
+    {
+      "question": "What is the purpose of log_transaction?",
+      "ground_truth": "Print log (mock logging)",
+      "context_required": ["utils.py"]
+    },
+    {
+      "question": "Which file contains the get_user_role function?",
+      "ground_truth": "auth.py",
+      "context_required": ["auth.py"]
+    },
+    {
+      "question": "What does format_currency return?",
+      "ground_truth": "Amount as USD string with dollar sign",
+      "context_required": ["utils.py"]
+    },
+    {
+      "question": "In the diagram, what comes after 'Submit payment'?",
+      "ground_truth": "validate_card()",
+      "context_required": ["payment_flow_fixed.png"]
+    },
+    {
+      "question": "Does process_payment return success or failure for invalid card?",
+      "ground_truth": "failed with reason 'Invalid card'",
+      "context_required": ["payment.py"]
+    },
+    {
+      "question": "How many functions are in auth.py?",
+      "ground_truth": "2 (verify_user and get_user_role)",
+      "context_required": ["auth.py"]
+    }
+  ]
+}
