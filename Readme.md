@@ -1,295 +1,315 @@
-# Multi‑Modal RAG: Code + Diagram Retrieval with RRF + Evaluation Suite
+# 🤖 Multi-Modal RAG Assistant
 
-A production‑ready **Retrieval‑Augmented Generation (RAG)** system that indexes both Python source code and diagram images, then answers natural language questions using a local LLM. Now includes a comprehensive evaluation suite with custom RAGAS-equivalent metrics for assessing system performance without requiring OpenAI API keys.
+> **Production-ready Retrieval-Augmented Generation (RAG) system** that understands both Python source code and diagram images from GitHub repositories. Built with Streamlit, FastAPI, ChromaDB, and local LLMs — private, offline-first, no cloud API costs for core functionality.
 
-Designed to demonstrate multi‑modality, fusion strategies (Reciprocal Rank Fusion), offline‑first AI, and rigorous evaluation – no cloud API keys required for core functionality.
+Designed to demonstrate **multi-modality**, **Reciprocal Rank Fusion (RRF)**, **local LLM inference**, **user authentication**, and **rigorous RAG evaluation** — all running on your own machine.
+
+---
 
 ## ✨ Features
 
-- **Code understanding** – parses Python files with `ast`, extracts functions, docstrings, and line numbers.
-- **Diagram OCR** – extracts text from PNG flowcharts using `easyocr` (CPU‑friendly).
-- **Dual‑index vector store** – ChromaDB with separate collections for code and diagrams.
-- **Reciprocal Rank Fusion (RRF)** – intelligently merges retrieval results from both modalities.
-- **Local LLM inference** – uses Ollama (e.g., `gemma4:e4b` or `llama3.2:3b`) – no API costs.
-- **Source citations** – every answer shows the exact file, function, lines, or diagram name.
-- **Offline‑first** – runs entirely on your machine (tested on RTX 4060 8GB + Ryzen 7).
-- **Comprehensive Evaluation Suite** – custom RAGAS-equivalent metrics (faithfulness, answer relevancy, context precision) that work with any OpenRouter model.
-- **Flexible Judging** – use powerful OpenRouter models (e.g., Nemotron, Qwen3) as judges while keeping answer generation local.
-- **Automated Reporting** – generates CSV results and formatted markdown reports with per-query analysis.
+- **Repository Indexing** — Clone and index any public GitHub repository via a clean web UI
+- **Multi-Modal Understanding** — Analyzes both Python source code (via `ast`) and diagram images (via EasyOCR)
+- **Dual-Index Vector Store** — ChromaDB with separate namespaced collections for code and diagrams per user
+- **Reciprocal Rank Fusion (RRF)** — Intelligently merges retrieval results from both modalities into a single ranked list
+- **Local LLM Inference** — Uses Ollama (e.g., `gemma4:e4b` or `llama3.2:3b`) — no API costs, no data leaving your machine
+- **Real-time Streaming** — Tokens stream back to the browser as they're generated
+- **Secure Authentication** — User registration, bcrypt password hashing, session tokens, and rate limiting
+- **Source Citations** — Every answer shows the exact file, function name, line numbers, or diagram source
+- **Comprehensive Evaluation Suite** — Custom RAGAS-equivalent metrics (faithfulness, answer relevancy, context precision) using any OpenRouter model as judge — no OpenAI required
+- **Automated Reporting** — Generates `evaluation_results.csv` and `evaluation_report.md` with per-query analysis
+- **Offline-First** — Runs entirely on your machine (tested on RTX 4060 8GB + Ryzen 7)
 
-## 📊 Evaluation Capabilities
+---
 
-The system now includes a built-in evaluation framework that measures:
+## 📋 Prerequisites
 
-- **Faithfulness**: Does the answer contradict the retrieved context? (Higher = less hallucination)
-- **Answer Relevancy**: How well does the answer address the original question? (Higher = more on-topic)
-- **Context Precision**: How useful is the retrieved context for answering the question? (Higher = better retrieval)
+- **Python 3.8+** (3.11+ recommended for evaluation features)
+- **Git** installed and accessible in your PATH
+- **Ollama** for local LLM inference ([install here](https://ollama.com))
+- **At least 4GB RAM** (8GB+ recommended)
+- **Internet connection** for cloning repositories and downloading models on first run
+- **OpenRouter API key** *(optional — only needed for the evaluation suite)*
 
-All scores are 0-1, with higher being better. The evaluation works with any model available via OpenRouter as the judge, while using local Ollama models for answer generation.
+---
 
-## 🧠 How It Works
-
-### Core RAG Pipeline (Unchanged)
-1. **Parsing**  
-   - Code: `ast` walks each `.py` file → list of functions with docstring and line range.  
-   - Diagram: `easyocr` reads text from `payment_flow_fixed.png` → one text document.
-
-2. **Indexing**  
-   - Embeddings: `sentence-transformers/all-MiniLM-L6-v2` (384 dims).  
-   - Storage: ChromaDB collections `code_functions` and `diagrams`.
-
-3. **Query**  
-   - User question → embedded → top‑k retrieved from **both** collections.  
-   - RRF fuses the two ranked lists into a single merged ranking.  
-   - Fused context + question → Ollama LLM → answer + citations.
-
-### Evaluation Pipeline (New)
-When running with `--evaluate`:
-1. Load test queries from `test_data.json`
-2. For each query:
-   - Retrieve context using core RAG pipeline
-   - Generate answer using local Ollama model
-   - Score answer using OpenRouter judge model via three metric prompts
-3. Aggregate results and generate reports:
-   - `evaluation_results.csv` (raw data)
-   - `evaluation_report.md` (formatted report with per-query analysis)
-
-## 🛠️ Tech Stack
-
-| Component | Technology |
-|-----------|------------|
-| Code parsing | Python `ast` |
-| OCR | EasyOCR |
-| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` |
-| Vector DB | ChromaDB (persistent) |
-| Answer LLM | Ollama (gemma4:e4b / llama3.2) |
-| Judge LLM | OpenRouter (configurable, e.g., nemotron-3-super) |
-| Fusion | Reciprocal Rank Fusion (RRF) |
-| Evaluation | Custom RAGAS-equivalent metrics |
-| Data Analysis | Pandas |
-| Config Management | Python-dotenv |
-| Language | Python 3.11+ |
-
-## 📦 Installation
+## 🔧 Installation
 
 ```bash
-# Clone the repository
+# 1. Clone the repository
 git clone https://github.com/DeepeshAlwani/multi-modal-rag.git
 cd multi-modal-rag
 
-# Create virtual environment (optional but recommended)
+# 2. Create and activate a virtual environment (recommended)
 python -m venv rag_env
-source rag_env/bin/activate   # or `rag_env\Scripts\activate` on Windows
+source rag_env/bin/activate        # Windows: rag_env\Scripts\activate
 
-# Install dependencies
+# 3. Install Python dependencies
 pip install -r requirements.txt
+
+# 4. Pull a local LLM via Ollama
+ollama pull gemma4:e4b              # or: ollama pull llama3.2:3b
+ollama serve                        # keep this terminal open
+
+# 5. (Optional) Configure OpenRouter for the evaluation suite
+# Create a .env file in the project root:
+echo "OPENROUTER_API_KEY=your_key_here" >> .env
+echo "JUDGE_MODEL=nvidia/nemotron-3-super-120b-a12b:free" >> .env
+echo "ANSWER_MODEL=gemma4:e4b" >> .env
 ```
 
-### Pull a local LLM (Ollama)
+The database initializes automatically on first run (`database.py` is called at import time).
 
-```bash
-# Install Ollama from https://ollama.com
-ollama pull gemma4:e4b   # or llama3.2:3b
-ollama serve             # keep this terminal open
-```
-
-### Configure OpenRouter for Evaluation (Optional but Recommended)
-
-1. Get an API key from https://openrouter.ai
-2. Create a `.env` file in the project root:
-   ```
-   OPENROUTER_API_KEY=your_api_key_here
-   JUDGE_MODEL=nvidia/nemotron-3-super-120b-a12b:free  # or any OpenRouter model
-   ANSWER_MODEL=gemma4:e4b  # local Ollama model for answer generation
-   ```
+---
 
 ## 🚀 Usage
 
-### 1. Prepare your data
+### Option A — Web Application (Streamlit + FastAPI)
 
-Place your Python files and a diagram `payment_flow_fixed.png` inside the `test_repo/` folder.  
-The diagram should contain text labels (OCR will extract them).
-
-### 2. Run the system
-
-#### Normal Query Mode
 ```bash
-python main.py
+# Terminal 1: Start the backend API
+python api.py
+# → Available at http://localhost:8000
+
+# Terminal 2: Start the frontend
+streamlit run app.py
+# → Available at http://localhost:8501
 ```
-On first run, it builds both indexes automatically.  
-Subsequent runs reuse the existing indexes (use `--rebuild` to force re‑indexing).  
-Type your questions at the prompt, `exit` to quit.
 
-#### Evaluation Mode
+**Walkthrough:**
+1. Navigate to `http://localhost:8501` and register or log in
+2. Paste a public GitHub repository URL in the sidebar and click **Clone & Index Repository**
+3. Wait for indexing to complete (time varies with repo size)
+4. Ask natural language questions about the codebase in the chat input
+5. View indexed function stats and browse the function list in the sidebar
+6. Click **📂 Change Repository** to switch to a different repo
+
+**Example questions:**
+- *"What does the `validate_card` function do?"*
+- *"How is authentication handled in this project?"*
+- *"List all functions that log something."*
+- *"Show me the main entry point of the application."*
+
+---
+
+### Option B — CLI Mode (Code + Diagram RAG)
+
+Place Python files and a diagram (`payment_flow_fixed.png`) inside the `test_repo/` folder, then:
+
 ```bash
+# Normal query mode (auto-builds index on first run)
+python main.py
+
+# Force rebuild indexes
+python main.py --rebuild
+
+# Run evaluation suite
 python main.py --evaluate
 ```
-This runs the full evaluation suite using queries from `test_data.json`.  
-Requires:
-- Ollama running with the answer model (default: gemma4:e4b)
-- OPENROUTER_API_KEY set in .env for judging
-- Optional: Set JUDGE_MODEL in .env (default: nvidia/nemotron-3-super-120b-a12b:free)
 
-#### Rebuild Indexes
-```bash
-python main.py --rebuild
+**Sample CLI output:**
 ```
-Forces reconstruction of both code and diagram indexes.
-
-### Example Queries (Normal Mode)
-```
-> What does validate_card do?
 > According to the diagram, what happens after 'Card valid?' if NO?
-> Which function is called after YES in the flowchart?
-> List all functions that log something.
-```
 
-### Sample Output (Normal Mode)
-```
 Answer: The diagram shows that after 'Card valid?' if NO, it goes to 'Return failed' and then ends.
 Sources:
   Diagram: payment_flow_fixed.png
 ```
 
-### Sample Output (Evaluation Mode)
+---
+
+### Evaluation Mode
+
+```bash
+python main.py --evaluate
 ```
-=* 70
-CUSTOM RAG EVALUATION  (No OpenAI — any OpenRouter model works)
-=* 70
 
-Step 1/3  Checking Ollama... OK  (gemma4:e4b ready)
-Step 2/3  Loading indexes... OK  (code=15 docs + diagram collection)
-Step 3/3  Evaluating 10 queries
+Requires Ollama running + `OPENROUTER_API_KEY` in your `.env`. Reads test cases from `test_data.json` and produces:
+- `evaluation_results.csv` — raw scores per query
+- `evaluation_report.md` — formatted report with per-query analysis
 
+**Sample evaluation output:**
+```
 [ 1/10] What does validate_card function do?
   [A+B] Retrieve + gemma4:e4b... done (45.2s)
-  [B] Answer : The function simulates card validation by checking...
-         GT    : It validates credit card details and returns boolean.
   [C] Judging with nvidia/nemotron-3-super-120b-a12b:free... done (12.1s)  F=1.00 R=1.00 P=1.00
-...
 ```
+
+---
+
+## 🧠 How It Works
+
+### Architecture
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌────────────────────┐
+│   Streamlit     │    │    FastAPI       │    │   Local Services   │
+│   Frontend      │◄──►│   Backend API    │◄──►│ (ChromaDB, Ollama) │
+└─────────────────┘    └──────────────────┘    └────────────────────┘
+        ▲                       ▲                       ▲
+        │                       │                       │
+   User Interface         Business Logic          Data Processing
+                          & Auth & Rate           & Vector Storage
+                             Limiting
+```
+
+### Core RAG Pipeline
+
+1. **Parsing**
+   - Code: `ast` walks each `.py` file → extracts functions with docstrings and line ranges
+   - Diagram: `easyocr` reads text from PNG flowcharts → one text document per image
+
+2. **Indexing**
+   - Embeddings: `sentence-transformers/all-MiniLM-L6-v2` (384 dimensions)
+   - Storage: ChromaDB with per-user namespaced collections (`code_functions_{hash}`, `diagrams_{hash}`)
+
+3. **Query & Retrieval**
+   - User question → embedded → top-k retrieved from both code and diagram collections
+   - **RRF fuses** the two ranked lists into a single merged ranking
+   - Fused context + question → Ollama LLM → streamed answer + source citations
+
+### Evaluation Pipeline
+
+1. Load test queries from `test_data.json`
+2. For each query: retrieve context → generate answer (local Ollama) → score with OpenRouter judge
+3. Aggregate and write reports
+
+### Evaluation Metrics
+
+| Metric | What It Measures | 1.0 = |
+|--------|-----------------|-------|
+| **Faithfulness** | Does the answer contradict or exceed the context? | All claims supported by context |
+| **Answer Relevancy** | Does the answer address the question? | Directly and completely answers |
+| **Context Precision** | Is the retrieved context useful? | Context directly contains needed info |
+
+**Score guide:** ≥ 0.8 excellent · 0.6–0.8 acceptable · < 0.6 needs attention
+
+---
+
+## 🛠️ Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| Frontend | Streamlit |
+| Backend API | FastAPI |
+| Authentication | bcrypt + SQLite sessions |
+| Code Parsing | Python `ast` |
+| Diagram OCR | EasyOCR |
+| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` |
+| Vector DB | ChromaDB (persistent) |
+| Retrieval Fusion | Reciprocal Rank Fusion (RRF) |
+| Answer LLM | Ollama (`gemma4:e4b` / `llama3.2`) |
+| Judge LLM | OpenRouter (configurable) |
+| LLM Integration | LangChain Core |
+| Git Operations | GitPython |
+| Config Management | python-dotenv |
+| Language | Python 3.11+ |
+
+---
 
 ## 📁 Project Structure
 
 ```
 .
-├── evaluate.py                 # RAG evaluation suite with custom metrics
-├── openrouter_llm.py           # OpenRouter API interface for judging
-├── parse_functions.py          # AST parsing + OCR diagram extraction
-├── build_index.py              # ChromaDB indexing and RRF fusion logic
-├── query_engine.py             # Query loop, RRF, Ollama integration
+├── api.py                      # FastAPI backend (auth, clone, query endpoints)
+├── app.py                      # Streamlit frontend
+├── build_index.py              # ChromaDB indexing logic
+├── query_engine.py             # RRF fusion + Ollama streaming integration
+├── parse_functions.py          # AST code parsing + EasyOCR diagram extraction
+├── database.py                 # SQLite user/session/rate-limit management
+├── evaluate.py                 # RAG evaluation suite with custom RAGAS-equivalent metrics
+├── openrouter_llm.py           # OpenRouter LangChain wrapper for judging
 ├── main.py                     # CLI entry point (rebuild / query / evaluate)
-├── test_repo/                  # Example code and diagram
+├── debug_collection.py         # Dev utility to inspect ChromaDB collections
+├── test_repo/                  # Example Python code and diagram for CLI mode
 │   ├── auth.py
 │   ├── payment.py
-│   ├── utils.py
-├── payment_flow_fixed.png
+│   └── utils.py
+├── payment_flow_fixed.png      # Example diagram for OCR indexing
 ├── test_data.json              # Evaluation test suite (10+ cross-modal queries)
 ├── chroma_db/                  # Persistent vector DB (gitignored)
+├── users.db                    # SQLite database (gitignored)
+├── repos/                      # Cloned repositories per user (gitignored)
 ├── requirements.txt
+├── .env.example                # Example environment configuration
 ├── evaluation_results.csv      # Generated: raw evaluation results
-├── evaluation_report.md        # Generated: formatted evaluation report
-└── .env.example                # Example environment configuration
+└── evaluation_report.md        # Generated: formatted evaluation report
 ```
 
-## 📊 Evaluation Details
+---
 
-### Metrics Explained
+## 🛠️ Troubleshooting
 
-1. **Faithfulness (0-1)**  
-   Measures whether the answer contains any information not supported by the context.  
-   - 1.0 = All claims in answer are supported by context  
-   - 0.0 = Answer contradicts or adds unsupported information to context
+**Connection errors when cloning repositories**
+Ensure Git is installed (`git --version`) and the URL is a public GitHub repo starting with `https://github.com/`.
 
-2. **Answer Relevancy (0-1)**  
-   Measures how well the answer addresses the original question.  
-   - 1.0 = Directly and completely answers the question  
-   - 0.5 = Partially addresses the question  
-   - 0.0 = Does not answer the question
+**Slow indexing performance**
+Indexing time scales with repo size. Close memory-intensive applications and try smaller repos first.
 
-3. **Context Precision (0-1)**  
-   Measures the usefulness of retrieved context for answering the question.  
-   - 1.0 = Context directly contains needed information  
-   - 0.5 = Context is somewhat relevant  
-   - 0.0 = Context is completely irrelevant
+**Authentication issues**
+Ensure the backend API is running at `http://localhost:8000`. Password reset is not implemented — register a new account if needed.
 
-### Evaluation Pipeline
+**Port already in use**
+Change `STREAMLIT_SERVER_PORT` in `.env`, or kill the process on port 8501/8000.
 
-For each test query:
-1. **Retrieve**: Get relevant code/diagram context using RRF fusion
-2. **Generate**: Produce answer using local Ollama model
-3. **Judge**: Score answer using three metric prompts with OpenRouter model
-4. **Record**: Store results for aggregation
+**Missing dependencies**
+Re-run `pip install -r requirements.txt` in the correct virtual environment. Some packages may need system-level dependencies — check individual package docs.
 
-### Model Requirements
+**Evaluation suite errors**
+Ensure Ollama is serving (`ollama serve`), the answer model is pulled, and `OPENROUTER_API_KEY` is set in `.env`.
 
-- **Answer Model**: Any Ollama model (local, private, fast)
-- **Judge Model**: Any OpenRouter model capable of following JSON-only instructions  
-  Recommended: `nvidia/nemotron-3-super-120b-a12b:free` (high quality, free tier)
-
-## 📈 Example Evaluation Results
-
-See `evaluation_report.md` for detailed output. Key sections:
-
-### Overall Metrics Summary
-```
-| Metric | Score |
-|--------|-------|
-| Faithfulness | 0.600 |
-| Answer Relevancy | 0.600 |
-| Context Precision | 0.600 |
-```
-
-### Per-Query Analysis
-Each query shows:
-- Question and ground truth
-- Generated answer (truncated)
-- Individual metric scores (F=Faithfulness, R=Relevancy, P=Precision)
-- Total latency
-
-### Interpretation Guide
-- **Scores ≥ 0.8**: Excellent performance
-- **Scores 0.6-0.8**: Acceptable with room for improvement
-- **Scores < 0.6**: Needs attention - consider:
-  - Better retrieval tuning
-  - Different answer model
-  - Context quality improvement
+---
 
 ## 🧪 Future Improvements
 
-- **Better diagram understanding** – replace OCR with a small VLM (e.g., moondream) to caption flowcharts and preserve arrow directions.
-- **Incremental indexing** – only re‑parse files that changed (using file hashes or timestamps).
-- **Web interface** – FastAPI backend + React frontend to chat with the system.
-- **Personal assistant agent** – fine‑tune a 7B LLM on the user's resume + project data to answer interview questions about the candidate.
-- **Advanced fusion** – experiment with learned re‑ranking (cross‑encoders) instead of RRF.
-- **Support for more code languages** – JavaScript, Java (using tree‑sitter).
-- **Automated hyperparameter tuning** for RRF k-value and retrieval parameters.
+- **Better diagram understanding** — replace OCR with a small VLM (e.g., moondream) to caption flowcharts and preserve arrow semantics
+- **Incremental indexing** — only re-parse files that changed, using file hashes or timestamps
+- **Advanced fusion** — experiment with learned re-ranking (cross-encoders) instead of RRF
+- **Support for more languages** — JavaScript, Java, TypeScript (via tree-sitter)
+- **Automated hyperparameter tuning** for RRF k-value and retrieval top-k
+- **Personal assistant agent** — fine-tune on a user's resume + project data for interview Q&A
+- **Persistent chat history** — store and replay conversations per repository
+
+---
 
 ## 🤝 Contributing
 
-This is a personal portfolio project, but suggestions and discussions are welcome.  
-If you find a bug or have an idea:
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Commit your changes: `git commit -m 'feat: add amazing feature'`
+4. Push to branch: `git push origin feature/amazing-feature`
+5. Open a Pull Request
 
-1. Open an **Issue** describing the problem or enhancement.
-2. Fork the repo, create a branch, and submit a **Pull Request**.
-3. Ensure your code follows PEP 8 and includes docstrings for new functions.
+Please follow PEP 8, include docstrings for new functions, and open an issue first for major changes.
 
-For major changes, please open an issue first to discuss what you would like to change.
+---
 
 ## 📄 License
 
-Distributed under the MIT License.  
-You are free to use, modify, and distribute this software for any purpose, with attribution.
+Distributed under the **MIT License**. You are free to use, modify, and distribute this software for any purpose, with attribution. See the [LICENSE](LICENSE) file for details.
+
+---
 
 ## 🙏 Acknowledgements
 
-- [ChromaDB](https://www.trychroma.com/) – persistent vector database.
-- [Sentence‑Transformers](https://www.sbert.net/) – easy and high‑quality embeddings.
-- [EasyOCR](https://github.com/JaidedAI/EasyOCR) – ready‑to‑use OCR for diagrams.
-- [Ollama](https://ollama.com/) – running LLMs locally without friction.
-- [OpenRouter](https://openrouter.ai/) – access to diverse LLM models for judging.
-- [FastAPI](https://fastapi.tiangolo.com/) (planned) – for the web interface.
-- [RAGAS](https://docs.ragas.io/) (inspiration) – for evaluation metrics framework.
+This project stands on the shoulders of some excellent open-source work:
 
-Built as a portfolio project to demonstrate multi‑modal RAG, RRF fusion, local LLM integration, and rigorous evaluation capabilities.  
-For any questions, feel free to reach out via GitHub Issues.
+- **[Streamlit](https://streamlit.io)** — the frontend framework that makes ML apps fast to build and beautiful out of the box
+- **[FastAPI](https://fastapi.tiangolo.com)** — high-performance async API framework with automatic OpenAPI docs
+- **[ChromaDB](https://www.trychroma.com)** — persistent, developer-friendly vector database
+- **[Sentence-Transformers](https://www.sbert.net)** — `all-MiniLM-L6-v2` and the broader SBERT ecosystem for easy, high-quality embeddings (Reimers & Gurevych, 2019)
+- **[EasyOCR](https://github.com/JaidedAI/EasyOCR)** — ready-to-use, GPU-optional OCR by JaidedAI
+- **[Ollama](https://ollama.com)** — frictionless local LLM serving; makes running `gemma4:e4b` and `llama3.2` trivially easy
+- **[GitPython](https://gitpython.readthedocs.io)** — Python library for interacting with Git repositories
+- **[LangChain Core](https://python.langchain.com)** — abstractions for building LLM-powered applications (used for the OpenRouter judge wrapper)
+- **[OpenRouter](https://openrouter.ai)** — unified API for accessing diverse LLM models; used here for evaluation judging without requiring OpenAI
+- **[RAGAS](https://docs.ragas.io)** — the evaluation metrics framework that inspired the custom faithfulness / relevancy / precision scoring used in this project
+- **[python-dotenv](https://github.com/theskumar/python-dotenv)** — clean `.env` config management
+- **[bcrypt](https://github.com/pyca/bcrypt)** — secure password hashing
+- **[pandas](https://pandas.pydata.org)** — data analysis and CSV report generation
+
+---
+
+*Built as a portfolio project to demonstrate multi-modal RAG, RRF fusion, local LLM integration, user authentication, and rigorous evaluation — all without cloud API dependencies.*
+
+**Happy Coding! 🚀**

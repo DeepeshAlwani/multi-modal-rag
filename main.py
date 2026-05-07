@@ -13,7 +13,7 @@ def main():
             print("Rebuilding index...")
         else:
             print("No index found. Building automatically...")
-        build_all_indexes("test_repo", "payment_flow_fixed.png")
+        build_all_indexes("test_repo", "payment_flow_fixed.png", repo_hash="test_repo_v1")
     else:
         print("Using existing index.")
     

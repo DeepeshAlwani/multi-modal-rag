@@ -12,7 +12,7 @@ def index_exists(collection_name):
     except:
         return False
 
-def build_index(documents, collection_name="code_functions"):
+def build_index(documents, collection_name):
     """Build index from list of document dicts."""
     print("Loading embedding model...")
     model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -33,16 +33,12 @@ def build_index(documents, collection_name="code_functions"):
     metadatas = []
     
     for doc in documents:
-        # If the document already has an 'id' field, use it as is (e.g., diagram)
         if 'id' in doc:
             doc_id = doc['id']
             content = doc['content']
             metadata = doc.get('metadata', {})
         else:
-            # Assume it's a raw function dictionary from parse_documents
-            # Build a proper document structure
             doc_id = f"{doc['file']}::{doc['name']}"
-            # Create a descriptive content for embedding
             content = f"Function name: {doc['name']}\nDocstring: {doc['docstring']}\nFile: {doc['file']}\nLines: {doc['lines']}"
             metadata = {
                 "file": doc['file'],
@@ -50,7 +46,6 @@ def build_index(documents, collection_name="code_functions"):
                 "lines": doc['lines']
             }
         
-        # Ensure metadata values are strings/numbers/bools (convert tuples to strings)
         for k, v in metadata.items():
             if isinstance(v, tuple):
                 metadata[k] = str(v)
@@ -71,17 +66,36 @@ def build_index(documents, collection_name="code_functions"):
     print(f"Successfully indexed {len(documents_list)} items into '{collection_name}'.")
     print(f"Total documents in collection: {collection.count()}")
 
-def build_all_indexes(folder_path="test_repo", diagram_file="payment_flow_fixed.png"):
-    # 1. Index code functions
-    functions = parse_documents(folder_path)
-    if functions:
-        build_index(documents=functions, collection_name="code_functions")
-    else:
-        print("No Python functions found.")
+def build_all_indexes(folder_path="test_repo", diagram_file=None, repo_hash=None):
+    print(f"\n📂 Scanning repository: {folder_path}")
     
-    # 2. Index diagram (optional, comment out if OCR not ready)
-    diagram_docs = parse_diagram_image(diagram_file)
-    if diagram_docs:
-        build_index(diagram_docs, collection_name="diagrams")
+    # If repo_hash is provided, use namespaced collection names
+    if repo_hash:
+        code_collection_name = f"code_functions_{repo_hash}"
+        diagram_collection_name = f"diagrams_{repo_hash}"
     else:
-        print("No diagram found or OCR failed.")
+        code_collection_name = "code_functions"
+        diagram_collection_name = "diagrams"
+    
+    # 1. Index code functions
+    print("🔍 Searching for Python files...")
+    functions = parse_documents(folder_path)
+    
+    if functions:
+        print(f"✅ Found {len(functions)} functions across all Python files")
+        build_index(documents=functions, collection_name=code_collection_name)
+    else:
+        print("⚠️ No Python functions found. Make sure your repository contains .py files.")
+    
+    # 2. Index diagram (optional)
+    if diagram_file is not None and os.path.exists(diagram_file):
+        print(f"📷 Processing diagram: {diagram_file}")
+        diagram_docs = parse_diagram_image(diagram_file)
+        if diagram_docs:
+            build_index(diagram_docs, collection_name=diagram_collection_name)
+        else:
+            print("No diagram found or OCR failed.")
+    else:
+        print("No diagram file provided, skipping diagram indexing.")
+    
+    return code_collection_name, diagram_collection_name
