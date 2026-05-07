@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Auth Bridge</title>
+</head>
+<body>
+  <script>
+    const TOKEN_KEY = "rag_session_token";
+
+    // Read token from localStorage
+    const token = localStorage.getItem(TOKEN_KEY) || "";
+    
+    if (token) {
+      // Build URL with auth_token query param, preserving other params
+      const url = new URL(window.parent.location);
+      url.searchParams.set('auth_token', token);
+      // Redirect parent to new URL
+      window.parent.location.href = url.toString();
+    }
+    // If no token, do nothing (iframe stays hidden)
+  </script>
+</body>
+</html>
+

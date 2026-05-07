@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Save Token</title>
+</head>
+<body>
+  <script>
+    const TOKEN_KEY = "rag_session_token";
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token);
+      console.log('Token saved');
+    }
+    // Notify parent (optional)
+    if (window.parent) {
+      window.parent.postMessage({type: 'token_saved'}, '*');
+    }
+  </script>
+  <p>Token saved.</p>
+</body>
+</html>

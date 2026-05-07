@@ -68,7 +68,7 @@ The database initializes automatically on first run (`database.py` is called at 
 
 ```bash
 # Terminal 1: Start the backend API
-python api.py
+uvicorn api:app --host 0.0.0.0 --port 8000 &
 # → Available at http://localhost:8000
 
 # Terminal 2: Start the frontend

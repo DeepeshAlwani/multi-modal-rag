@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Clear Token</title>
+</head>
+<body>
+  <script>
+    const TOKEN_KEY = "rag_session_token";
+    localStorage.removeItem(TOKEN_KEY);
+    console.log('Token cleared');
+    if (window.parent) {
+      window.parent.postMessage({type: 'token_cleared'}, '*');
+    }
+  </script>
+  <p>Token cleared.</p>
+</body>
+</html>
