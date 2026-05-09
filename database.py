@@ -198,20 +198,13 @@ def check_rate_limit(user_id: int | None, ip_address: str, limit: int = 100, win
 # ---------------------------------------------------------------------------
 
 def upsert_user_repo(user_id: int, repo_url: str, repo_path: str, repo_hash: str) -> None:
-    """Insert or replace the active repo record for a user."""
     with get_db() as conn:
         conn.execute(
-            """INSERT INTO user_active_repo (user_id, repo_url, repo_path, repo_hash, updated_at)
-               VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-               ON CONFLICT(user_id) DO UPDATE SET
-                   repo_url   = excluded.repo_url,
-                   repo_path  = excluded.repo_path,
-                   repo_hash  = excluded.repo_hash,
-                   updated_at = CURRENT_TIMESTAMP""",
+            """INSERT OR REPLACE INTO user_active_repo (user_id, repo_url, repo_path, repo_hash, updated_at)
+               VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)""",
             (user_id, repo_url, repo_path, repo_hash)
         )
         conn.commit()
-
 
 def get_user_repo(user_id: int) -> dict | None:
     """Return the active repo info for a user, or None if not set."""

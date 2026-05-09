@@ -260,6 +260,163 @@ Ensure Ollama is serving (`ollama serve`), the answer model is pulled, and `OPEN
 
 ---
 
+## 🖼️ Demo
+
+Screenshots of the working system can be found in the `docs/screenshots/` folder. To add your own:
+
+1. Take a screenshot of a conversation in the Streamlit UI
+2. Save it inside `docs/screenshots/` in your repo (e.g. `docs/screenshots/save_tweet_demo.png`)
+3. Reference it in this README like so:
+
+```markdown
+![save_tweet conversation](docs/screenshots/save_tweet_demo.png)
+```
+
+> **Example conversation screenshot** — add yours here once uploaded to the repo:
+> ```
+> docs/screenshots/save_tweet_demo.png
+> ```
+
+---
+
+## 🐛 Challenges & How We Fixed Them
+
+Building a reliable RAG system on top of a local LLM turned out to be harder than expected. Here's an honest account of every bug we hit and how it was resolved — useful if you run into the same issues.
+
+---
+
+### Challenge 1 — The RAG system was hallucinating function definitions entirely
+
+**Symptom:** Asking *"what does `save_tweet` do?"* returned a completely fabricated answer — invented function names like `generate_social_media_post`, incorrect signatures, and logic that didn't exist anywhere in the indexed repository.
+
+**Root cause — three bugs stacked on top of each other:**
+
+**Bug A: `semantic_text` didn't include source code**
+
+In `build_index.py`, the text stored in ChromaDB for each function was only the metadata summary:
+
+```python
+# ❌ Before — no source code stored
+semantic_text = (
+    f"Function: {name}\n"
+    f"Language: {lang}\n"
+    f"File: {ffile}\n"
+    f"Lines: {lines}\n"
+    f"Docstring: {doc or '(none)'}"
+)
+```
+
+So when `_build_code_context` in `query_engine.py` tried to read the file from disk and failed for any reason, the ChromaDB fallback snippet given to the LLM contained only a one-line docstring — nowhere near enough context to answer accurately.
+
+**Fix:** Include the actual source code in the stored document:
+
+```python
+# ✅ After — source code included
+semantic_text = (
+    f"Function: {name}\n"
+    f"Language: {lang}\n"
+    f"File: {ffile}\n"
+    f"Lines: {lines}\n"
+    f"Docstring: {doc or '(none)'}\n\n"
+    f"Source:\n{src[:2000]}"
+)
+```
+
+---
+
+**Bug B: `\b` word boundaries don't work across underscores**
+
+The keyword boost logic converted the question to underscores *first*, then tried to strip question words using `\b`:
+
+```python
+# ❌ Before — wrong order
+question_lower = re.sub(r'\s+', '_', question.lower())  # "what does save_tweet do" → "what_does_save_tweet_do"
+clean_name = re.sub(r'\b(what does|do|does)\b', '', question_lower)
+# Result: "what_does_save_tweet_do" → stripping \bdo\b fails because _ is a word char
+# clean_name = "save_tweet_do"  ← wrong, $eq lookup finds nothing
+```
+
+Python's `\b` treats underscores as word characters, so there's no boundary between `_` and `d` — the strip never fires.
+
+**Fix:** Strip question words *before* converting spaces to underscores:
+
+```python
+# ✅ After — strip first, then underscore
+question_words_stripped = re.sub(
+    r'\b(what does|what is|show me|explain|how does|do|does|work|function|...)\b',
+    ' ', question.lower().strip()
+)
+clean_name = re.sub(r'\s+', '_', question_words_stripped.strip()).strip('_')
+# "what does save_tweet do" → strip → "save_tweet" → no spaces → "save_tweet" ✅
+```
+
+---
+
+**Bug C: The structural (CodeBERT) index was built but never queried**
+
+`build_index.py` built a `code_structural_{hash}` collection using CodeBERT embeddings on raw source code, but `query_engine.py` only ever queried `code_functions_{hash}` (the MiniLM semantic index). The structural index was wasted effort.
+
+**Fix:** Query both collections and fuse them via RRF:
+
+```python
+# ✅ Added to run_query_streaming
+structural_col_name = f"code_structural_{repo_hash}" if repo_hash else "code_structural"
+try:
+    structural_collection = db.get_collection(structural_col_name)
+    struct_res = structural_collection.query(query_embeddings=emb, n_results=5)
+    ...
+    results_dict["structural"] = struct_items
+except Exception:
+    pass
+```
+
+---
+
+### Challenge 2 — The model ignored the retrieved context entirely
+
+**Symptom:** Even after all three bugs above were fixed, the confirmed-correct index was being queried correctly, the file existed on disk at the right path, and the prompt contained real source code — yet the LLM still hallucinated completely different function names and logic.
+
+**Diagnosis:** Verified via a direct ChromaDB query that `save_tweet` was indexed with full source. Verified the file path resolved correctly on disk. Added `[DEBUG]` logging to confirm `clean_name='save_tweet'` was being computed correctly. The entire retrieval pipeline was working — the model was simply ignoring its context.
+
+**Root cause:** `gemma4:e4b` is a heavily quantized model that does not reliably follow the instruction *"Answer using ONLY the source code shown above."* It reverts to training-data knowledge and fabricates answers rather than reading the provided context.
+
+**Fix:** Switch the answer model to `llama3.2:latest`, which is already used by the Twitter bot for tweet generation and is properly instruction-tuned:
+
+```python
+# In query_engine.py
+# ❌ Before
+def _stream_ollama(prompt: str, model: str = "gemma4:e4b") -> Iterator[str]:
+
+# ✅ After
+def _stream_ollama(prompt: str, model: str = "llama3.2:latest") -> Iterator[str]:
+```
+
+To make this configurable without touching code, use an environment variable:
+
+```python
+import os
+DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:latest")
+
+def _stream_ollama(prompt: str, model: str = DEFAULT_MODEL) -> Iterator[str]:
+```
+
+Then set `OLLAMA_MODEL=gemma4:e4b` in `.env` if you want to experiment with other models.
+
+---
+
+### Key takeaway
+
+RAG hallucination is almost never just one thing. In this case it was: missing source in the index → regex bug preventing exact-match retrieval → model ignoring context even when retrieval worked. Fixing all three in sequence is what finally resolved it. When debugging RAG, always verify the full chain: what's stored → what's retrieved → what the LLM actually receives → whether the LLM respects it.
+
+---
+
+![Working conversation demo](/screenshots/Screenshot_20260509_234118.png)
+
+
+
+
+![Working conversation demo](/screenshots/Screenshot_20260509_234208.png)
+
 ## 🧪 Future Improvements
 
 - **Better diagram understanding** — replace OCR with a small VLM (e.g., moondream) to caption flowcharts and preserve arrow semantics

@@ -13,7 +13,7 @@ from datetime import datetime
 import hashlib
 
 from database import verify_session, check_rate_limit, add_repo_job, get_user_repo, upsert_user_repo
-from build_index import build_all_indexes
+from build_index import build_all_indexes, index_exists
 from query_engine import run_query_streaming
 
 app = FastAPI(title="Multi-Modal RAG API")
@@ -97,8 +97,10 @@ async def clone_repo(req: RepoRequest, user: dict = Depends(get_current_user)):
     repo_hash = hashlib.md5(f"{user['id']}_{req.repo_url}".encode()).hexdigest()
     repo_path = f"./repos/{user['id']}/{repo_hash}"
 
-    # If already cloned and indexed, just update the DB record and return
-    if os.path.exists(repo_path):
+    index_col = f"code_functions_{repo_hash}"
+
+    # Already cloned AND indexed — nothing to do
+    if os.path.exists(repo_path) and index_exists(index_col):
         upsert_user_repo(user['id'], req.repo_url, repo_path, repo_hash)
         return {
             "message": "Repository already indexed",
@@ -109,8 +111,12 @@ async def clone_repo(req: RepoRequest, user: dict = Depends(get_current_user)):
     os.makedirs(repo_path, exist_ok=True)
 
     try:
-        print(f"Cloning {req.repo_url} into {repo_path}...")
-        git.Repo.clone_from(req.repo_url, repo_path, depth=1)
+        # Only re-clone if the folder doesn't exist yet
+        if not os.path.exists(repo_path) or not os.listdir(repo_path):
+            print(f"Cloning {req.repo_url} into {repo_path}...")
+            git.Repo.clone_from(req.repo_url, repo_path, depth=1)
+        else:
+            print(f"Repo folder exists but index missing — re-indexing {repo_path}...")
 
         # Persist to DB immediately after clone so it survives restarts
         upsert_user_repo(user['id'], req.repo_url, repo_path, repo_hash)
@@ -129,8 +135,8 @@ async def clone_repo(req: RepoRequest, user: dict = Depends(get_current_user)):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        # Clean up partial clone on failure
-        if os.path.exists(repo_path):
+        # Only clean up the folder if we were the one who created it (fresh clone)
+        if os.path.exists(repo_path) and not os.listdir(repo_path):
             shutil.rmtree(repo_path, ignore_errors=True)
         raise HTTPException(status_code=500, detail=f"Failed to clone/index: {str(e)}")
 
