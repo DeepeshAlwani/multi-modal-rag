@@ -57,6 +57,7 @@ class TestExtractJson:
         """Nested objects should parse correctly."""
         raw = '{"scores": {"f": 0.9, "r": 0.8}, "faithful": true}'
         result = extract_json(raw)
+        print(result)
         assert result.get("faithful") is True
 
     def test_faithful_false(self):

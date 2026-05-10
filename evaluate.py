@@ -93,7 +93,6 @@ def call_judge(prompt: str, max_retries: int = 3) -> str:
             time.sleep(3)
     return "ERROR"
 
-
 def extract_json(text: str) -> dict:
     """
     Pull a JSON object out of a model response.
@@ -106,7 +105,9 @@ def extract_json(text: str) -> dict:
     """
     # Remove reasoning traces
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    text = re.sub(r"^.*?(?=\{)","", text, flags=re.DOTALL)  # Remove everything before first {
+    first = text.find("{")
+    if first != -1:
+        text = text[first:]
     
     # Try direct parse first (for clean responses)
     try:
@@ -116,10 +117,11 @@ def extract_json(text: str) -> dict:
     
     # Find all top-level JSON objects (brace‑balanced blocks starting at brace_count == 0)
     # and return the one with the largest span (= outermost).
-    json_objects = []          # (length, parsed_dict)
+    last_valid = None
+
     brace_count = 0
     start_idx = -1
-    
+
     for i, char in enumerate(text):
         if char == '{':
             if brace_count == 0:
@@ -130,25 +132,14 @@ def extract_json(text: str) -> dict:
             if brace_count == 0 and start_idx != -1:
                 candidate = text[start_idx:i+1]
                 try:
-                    obj = json.loads(candidate)
-                    json_objects.append((len(candidate), obj))
+                    last_valid = json.loads(candidate)
                 except json.JSONDecodeError:
                     pass
                 start_idx = -1
-    
-    if json_objects:
-        # Return the outermost (longest) valid JSON
-        json_objects.sort(key=lambda x: x[0], reverse=True)
-        return json_objects[0][1]
-    
-    # Fallback: regex for simple key-value pairs (no nesting)
-    matches = re.findall(r'\{[^{}]*\}', text)
-    for match in reversed(matches):
-        try:
-            return json.loads(match)
-        except json.JSONDecodeError:
-            pass
-    
+
+    if last_valid is not None:
+        return last_valid
+        
     return {}
 
 

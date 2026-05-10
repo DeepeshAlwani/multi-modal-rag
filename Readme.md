@@ -154,16 +154,18 @@ Requires Ollama running + `OPENROUTER_API_KEY` in your `.env`. Reads test cases 
 pytest tests/ -v
 ```
 
-Expected output: **39 passed, 1 known failure** (`test_nested_json_object` — see [Known Issues](#known-issues)).
+Expected output: **40 passed**.
 
 ```
 tests/test_evaluate.py::TestExtractJson::test_clean_json PASSED
 tests/test_evaluate.py::TestExtractJson::test_think_tags_stripped PASSED
+tests/test_evaluate.py::TestExtractJson::test_nested_json_object PASSED
+tests/test_evaluate.py::TestExtractJson::test_multiple_json_objects_returns_last PASSED
 ...
 tests/test_query_engine.py::TestReciprocalRankFusion::test_deduplication_across_collections PASSED
 tests/test_query_engine.py::TestBuildPrompt::test_empty_sources_does_not_crash PASSED
 ...
-1 failed, 39 passed in 3.10s
+40 passed in 3.10s
 ```
 
 Tests cover:
@@ -357,15 +359,24 @@ Run pytest from the project root: `pytest tests/ -v`. The `conftest.py` inserts 
 
 ---
 
-## ⚠️ Known Issues
 
-### `test_nested_json_object` failure
 
-When `extract_json()` encounters a JSON object with nested sub-objects (e.g., `{"scores": {"f": 0.9, "r": 0.8}, "faithful": true}`), the current regex-based JSON finder returns the innermost `{...}` match (`{"f": 0.9, "r": 0.8}`) rather than the full outer object.
+## ⚠️ Known Limitations
 
-**Impact:** Low — judge models rarely produce nested JSON in practice. Flat objects (`{"faithful": true, "relevancy": 0.9}`) parse correctly in all cases.
+### Generalistic questions produce partial answers
 
-**Fix (tracked):** Replace the regex scan with a bracket-counting parser that always selects the outermost complete JSON object.
+Questions like *"tell me about this codebase"* or *"list all functions"* will return incomplete answers. This is expected behaviour, not a bug, and stems from two compounding constraints:
+
+**1. Token budget:** The system retrieves `rerank_top_n` functions (default 4–10) and feeds their source code into the LLM prompt. A codebase of any meaningful size has dozens or hundreds of functions — only a small slice fits in the context window before hitting the LLM's practical reasoning limit. Increasing `rerank_top_n` beyond ~10 degrades answer quality as the model loses track of context in the middle of long prompts.
+
+**2. Small model instruction-following:** Local models like `llama3.2:latest` and `gemma4:e4b` are heavily quantized and work best on focused, specific questions. They do not reliably synthesize a high-level project overview from many code snippets — they tend to describe only what they see in the top few retrieved results.
+
+**Recommendation for best results:** Ask specific, targeted questions:
+- ✅ *"What does `verify_user` do?"*
+- ✅ *"How is rate limiting implemented?"*
+- ✅ *"Show me the `get_user_repo` function."*
+- ⚠️ *"Tell me about this codebase"* — will give a partial answer based on the top retrieved functions only
+- ⚠️ *"List all functions"* — use the `/repo_info` endpoint or the sidebar function browser instead
 
 ---
 
@@ -493,6 +504,40 @@ Set `OLLAMA_MODEL=gemma4:e4b` in `.env` to experiment with other models without 
 
 This logic is covered by the 12 `TestExtractJson` unit tests.
 
+**Additional fix — `test_nested_json_object` + regression in `test_multiple_json_objects_returns_last`:**
+
+The original `extract_json()` used a regex scan that returned the *first* complete `{...}` match. This caused `test_nested_json_object` to fail — for input like `{"scores": {"f": 0.9}, "faithful": true}` it returned the inner `{"f": 0.9}` rather than the full outer object.
+
+Fixing this by switching to a bracket-counting parser that tracks brace depth introduced a new failure: `test_multiple_json_objects_returns_last`. The test expects the *last* top-level JSON object when multiple are present (the reasoning models emit intermediate blobs before the final answer), but the initial bracket-counting implementation returned the *first*.
+
+**Final fix:** The bracket-counting parser now iterates all top-level `{...}` blocks and stores each valid parse in `last_valid`, overwriting on every successful candidate. At the end it returns `last_valid` — the last valid top-level JSON object. This satisfies both tests: nested objects are captured in full (outermost wins), and multiple objects return the last one.
+
+```python
+# ✅ Final extract_json — bracket-counting, returns last valid top-level object
+last_valid = None
+brace_count = 0
+start_idx = -1
+
+for i, char in enumerate(text):
+    if char == '{':
+        if brace_count == 0:
+            start_idx = i
+        brace_count += 1
+    elif char == '}':
+        brace_count -= 1
+        if brace_count == 0 and start_idx != -1:
+            candidate = text[start_idx:i+1]
+            try:
+                last_valid = json.loads(candidate)  # overwrites — last wins
+            except json.JSONDecodeError:
+                pass
+            start_idx = -1
+
+return last_valid if last_valid is not None else {}
+```
+
+Both `test_nested_json_object` and `test_multiple_json_objects_returns_last` now pass. All 40 tests green.
+
 ---
 
 ### Challenge 4 — Centralized configuration was missing
@@ -525,7 +570,6 @@ RAG hallucination is almost never just one thing. In this case it was: missing s
 
 ## 🧪 Future Improvements
 
-- **Fix `test_nested_json_object`** — replace regex JSON scan with a bracket-counting outermost-match parser
 - **Better diagram understanding** — replace OCR with a small VLM (e.g., moondream) to caption flowcharts and preserve arrow semantics
 - **Incremental indexing** — only re-parse files that changed, using file hashes or timestamps
 - **Advanced fusion** — experiment with learned re-ranking (cross-encoders) instead of RRF

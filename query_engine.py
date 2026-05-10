@@ -181,7 +181,7 @@ def _build_code_context(top_docs: list[tuple[str, dict]], repo_path: str) -> str
 def _build_prompt(question: str, code_context: str, sources: list[str]) -> str:
     source_list = "\n".join(f"  • {s}" for s in sources)
     return f"""You are an expert code-review assistant. You have been given real source code \
-extracted directly from the repository files, with line numbers preserved so you can \
+extracted directly from the repository files, with line numbers and the code preserved so you can \
 reason about indentation, scope, and call order.
 
 **Sources retrieved:**
@@ -241,6 +241,8 @@ _STOP_WORDS_RE = re.compile(
     r'|tell|me|about|give|can|you|please|show|how|why|when|where|is|are)\b'
 )
 
+def _is_likely_function_name(clean: str) -> bool:
+    return "_" in clean or len(clean.split()) == 1 and len(clean) > 4
 
 def _query_to_clean_name(question: str) -> str:
     """Strip stop-words from the question and convert to snake_case for name matching."""
@@ -298,7 +300,7 @@ async def run_query_streaming(
             rest.append((doc, meta))
 
     # --- Direct metadata lookup: exact function name match via ChromaDB filter ---
-    if clean_name:
+    if clean_name and _is_likely_function_name(clean_name):
         try:
             direct = code_collection.get(
                 where={"function": {"$eq": clean_name}}
@@ -312,7 +314,9 @@ async def run_query_streaming(
         except Exception:
             pass
 
-    code_items = boosted + rest  # exact/partial name matches float to top
+        code_items = boosted + rest  # exact/partial name matches float to top
+    else:
+        code_items = raw_items  # no clean name extracted, keep original order
 
     results_dict: dict[str, list] = {"code": code_items}
 

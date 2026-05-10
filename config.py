@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     # Retrieval
     # ------------------------------------------------------------------
     retrieval_top_k: int = Field(10, description="Candidates fetched from each collection before RRF")
-    rerank_top_n: int = Field(4, description="Documents kept after RRF fusion for the final prompt")
+    rerank_top_n: int = Field(15, description="Documents kept after RRF fusion for the final prompt")
     rrf_k: int = Field(60, description="RRF constant k (higher = flatter score distribution)")
     context_lines: int = Field(
         10,
