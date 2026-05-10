@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
+import re
 import textwrap
+import threading
 from pathlib import Path
 from typing import Iterator
 
@@ -25,8 +28,22 @@ import requests
 import chromadb
 from sentence_transformers import SentenceTransformer
 
-# How many lines of surrounding context to include around each matched function
-CONTEXT_LINES = 10  # lines before/after the function node
+from config import settings
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Module-level model singleton — loaded once, reused on every request
+# ---------------------------------------------------------------------------
+_embed_model: SentenceTransformer | None = None
+
+def _get_embed_model() -> SentenceTransformer:
+    global _embed_model
+    if _embed_model is None:
+        logger.info("Loading embedding model: %s", settings.semantic_model)
+        _embed_model = SentenceTransformer(settings.semantic_model)
+    return _embed_model
+
 
 # ---------------------------------------------------------------------------
 # Reciprocal Rank Fusion
@@ -34,13 +51,14 @@ CONTEXT_LINES = 10  # lines before/after the function node
 
 def reciprocal_rank_fusion(
     results_dict: dict[str, list[tuple[str, dict]]],
-    k: int = 60,
+    k: int | None = None,
 ) -> list[tuple[str, dict]]:
     """
     results_dict: {'collection_name': [(doc_text, metadata), ...]}
     The list order is the original ranking (best first).
     Returns a merged list sorted by fused RRF score.
     """
+    k = k if k is not None else settings.rrf_k
     scores: dict[str, float] = {}
     doc_map: dict[str, tuple[str, dict]] = {}
 
@@ -65,7 +83,7 @@ def _read_file_window(
     filepath: str,
     start_line: int,
     end_line: int,
-    context: int = CONTEXT_LINES,
+    context: int | None = None,
 ) -> str:
     """
     Read the real source file and return the function plus surrounding lines.
@@ -73,6 +91,7 @@ def _read_file_window(
     start_line / end_line are 1-indexed (as stored in ChromaDB metadata).
     Returns the raw text with correct indentation — no tokenisation artefacts.
     """
+    context = context if context is not None else settings.context_lines
     try:
         with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
             all_lines = fh.readlines()
@@ -135,7 +154,7 @@ def _build_code_context(top_docs: list[tuple[str, dict]], repo_path: str) -> str
         source_window = ""
 
         if candidate and os.path.isfile(candidate):
-            source_window = _read_file_window(candidate, start, end, CONTEXT_LINES)
+            source_window = _read_file_window(candidate, start, end)
 
         if source_window:
             lang_hint = language or Path(filepath).suffix.lstrip(".") or "code"
@@ -190,9 +209,11 @@ reason about indentation, scope, and call order.
 # Ollama streaming
 # ---------------------------------------------------------------------------
 
-def _stream_ollama(prompt: str, model: str = "llama3.2:latest") -> Iterator[str]:
+def _stream_ollama(prompt: str, model: str | None = None) -> Iterator[str]:
+    model = model or settings.ollama_model
+    url = f"{settings.ollama_url}/api/generate"
     resp = requests.post(
-        "http://localhost:11434/api/generate",
+        url,
         json={"model": model, "prompt": prompt, "stream": True},
         stream=True,
         timeout=120,
@@ -211,6 +232,23 @@ def _stream_ollama(prompt: str, model: str = "llama3.2:latest") -> Iterator[str]
 
 
 # ---------------------------------------------------------------------------
+# Keyword boost helper
+# ---------------------------------------------------------------------------
+
+_STOP_WORDS_RE = re.compile(
+    r'\b(what does|what is|show me|explain|how does|tell me about|can you show'
+    r'|do|does|work|function|the|a|an|and|or|in|of|for|to|it|its|this|that'
+    r'|tell|me|about|give|can|you|please|show|how|why|when|where|is|are)\b'
+)
+
+
+def _query_to_clean_name(question: str) -> str:
+    """Strip stop-words from the question and convert to snake_case for name matching."""
+    stripped = _STOP_WORDS_RE.sub(' ', question.lower().strip())
+    return re.sub(r'\s+', '_', stripped.strip()).strip('_')
+
+
+# ---------------------------------------------------------------------------
 # Public: streaming query (used by api.py)
 # ---------------------------------------------------------------------------
 
@@ -222,8 +260,8 @@ async def run_query_streaming(
     """
     Async generator that yields answer tokens for the FastAPI streaming endpoint.
     """
-    model = SentenceTransformer("all-MiniLM-L6-v2")
-    db = chromadb.PersistentClient(path="./chroma_db")
+    model = _get_embed_model()
+    db = chromadb.PersistentClient(path=settings.chroma_path)
 
     code_col_name = f"code_functions_{repo_hash}" if repo_hash else "code_functions"
     diag_col_name = f"diagrams_{repo_hash}" if repo_hash else "diagrams"
@@ -231,33 +269,24 @@ async def run_query_streaming(
     try:
         code_collection = db.get_collection(code_col_name)
     except Exception as exc:
+        logger.error("Collection not found: %s — %s", code_col_name, exc)
         yield f"Error: Collection not found — {exc}"
         return
 
     emb = model.encode([question]).tolist()
 
-    # Retrieve top-10 from code index (wider net before boosting)
-    code_res = code_collection.query(query_embeddings=emb, n_results=10)
+    # Retrieve top-k from code index (wider net before boosting)
+    code_res = code_collection.query(
+        query_embeddings=emb, n_results=settings.retrieval_top_k
+    )
     raw_items: list[tuple[str, dict]] = []
     if code_res["documents"][0]:
         for doc, meta in zip(code_res["documents"][0], code_res["metadatas"][0]):
             raw_items.append((doc, meta))
 
     # --- Keyword boost: float results whose function name matches the query ---
-    import re
-
-    # Step 1: strip question words FIRST (while spaces still exist so \b works)
-    question_words_stripped = re.sub(
-        r'\b(what does|what is|show me|explain|how does|tell me about|can you show'
-        r'|do|does|work|function|the|a|an|and|or|in|of|for|to|it|its|this|that'
-        r'|tell|me|about|give|can|you|please|show|how|why|when|where|is|are)\b',
-        ' ',
-        question.lower().strip()
-    )
-    # Step 2: collapse spaces, then convert remaining spaces to underscores
-    clean_name = re.sub(r'\s+', '_', question_words_stripped.strip()).strip('_')
-
-    print(f"[DEBUG] question='{question}' → clean_name='{clean_name}'")
+    clean_name = _query_to_clean_name(question)
+    logger.debug("query=%r → clean_name=%r", question, clean_name)
 
     boosted: list[tuple[str, dict]] = []
     rest: list[tuple[str, dict]] = []
@@ -275,8 +304,8 @@ async def run_query_streaming(
                 where={"function": {"$eq": clean_name}}
             )
             if direct["metadatas"]:
-                seen_fnames = {m.get("function") for m, _ in [(m, d) for m, d in
-                               [(meta, doc) for doc, meta in boosted]]}
+                seen_fnames = {m.get("function") for m, _ in
+                               [(meta, doc) for doc, meta in boosted]}
                 for doc, meta in zip(direct["documents"], direct["metadatas"]):
                     if meta.get("function") not in seen_fnames:
                         boosted.insert(0, (doc, meta))  # exact match goes first
@@ -314,8 +343,8 @@ async def run_query_streaming(
     except Exception:
         pass
 
-    fused = reciprocal_rank_fusion(results_dict, k=60)
-    top_docs = fused[:4]  # 4 gives a good context/token-budget balance
+    fused = reciprocal_rank_fusion(results_dict)
+    top_docs = fused[: settings.rerank_top_n]
 
     # Build human-readable source list for prompt header
     sources: list[str] = []
@@ -345,7 +374,6 @@ async def run_query_streaming(
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, None)  # sentinel
 
-    import threading
     threading.Thread(target=_produce, daemon=True).start()
 
     while True:
@@ -360,15 +388,15 @@ async def run_query_streaming(
 # ---------------------------------------------------------------------------
 
 def run_query(repo_path: str = "test_repo", repo_hash: str | None = None):
-    model = SentenceTransformer("all-MiniLM-L6-v2")
-    db = chromadb.PersistentClient(path="./chroma_db")
+    model = _get_embed_model()
+    db = chromadb.PersistentClient(path=settings.chroma_path)
 
     code_col_name = f"code_functions_{repo_hash}" if repo_hash else "code_functions"
 
     try:
         code_collection = db.get_collection(code_col_name)
     except Exception as exc:
-        print(f"Error: {exc}")
+        logger.error("Failed to load collection %s: %s", code_col_name, exc)
         return
 
     diag_collection = None
@@ -376,9 +404,13 @@ def run_query(repo_path: str = "test_repo", repo_hash: str | None = None):
         diag_collection = db.get_collection(
             f"diagrams_{repo_hash}" if repo_hash else "diagrams"
         )
-        print(f"Loaded {code_collection.count()} code units + {diag_collection.count()} diagram(s).")
+        logger.info(
+            "Loaded %d code units + %d diagram(s)",
+            code_collection.count(),
+            diag_collection.count(),
+        )
     except Exception:
-        print(f"Loaded {code_collection.count()} code units (no diagram index).")
+        logger.info("Loaded %d code units (no diagram index)", code_collection.count())
 
     print("Ask questions (type 'exit' to quit).\n")
 
@@ -388,7 +420,9 @@ def run_query(repo_path: str = "test_repo", repo_hash: str | None = None):
             break
 
         emb = model.encode([q]).tolist()
-        code_res = code_collection.query(query_embeddings=emb, n_results=5)
+        code_res = code_collection.query(
+            query_embeddings=emb, n_results=settings.retrieval_top_k
+        )
         code_items = [
             (doc, meta)
             for doc, meta in zip(
@@ -407,14 +441,16 @@ def run_query(repo_path: str = "test_repo", repo_hash: str | None = None):
                     )
                 ]
 
-        fused = reciprocal_rank_fusion(results_dict, k=60)
-        top_docs = fused[:4]
+        fused = reciprocal_rank_fusion(results_dict)
+        top_docs = fused[: settings.rerank_top_n]
 
         sources = []
         for _, meta in top_docs:
             if "function" in meta or "name" in meta:
                 fname = meta.get("function", meta.get("name", "?"))
-                sources.append(f"{meta.get('file', '?')} → {fname} (lines {meta.get('lines', '?')})")
+                sources.append(
+                    f"{meta.get('file', '?')} → {fname} (lines {meta.get('lines', '?')})"
+                )
             else:
                 sources.append(f"Diagram: {meta.get('file', 'unknown')}")
 

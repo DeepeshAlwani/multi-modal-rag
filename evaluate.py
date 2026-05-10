@@ -102,8 +102,9 @@ def extract_json(text: str) -> dict:
     2. Multiple JSON objects in response
     3. Markdown code blocks
     4. Incomplete or malformed JSON
+    5. Nested JSON objects – returns the outermost valid object
     """
-    # Remove  reasoning traces
+    # Remove reasoning traces
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
     text = re.sub(r"^.*?(?=\{)","", text, flags=re.DOTALL)  # Remove everything before first {
     
@@ -113,9 +114,9 @@ def extract_json(text: str) -> dict:
     except json.JSONDecodeError:
         pass
     
-    # Try to find JSON objects in order (last one is usually the answer)
-    # Use a more robust pattern that handles nested braces
-    json_objects = []
+    # Find all top-level JSON objects (brace‑balanced blocks starting at brace_count == 0)
+    # and return the one with the largest span (= outermost).
+    json_objects = []          # (length, parsed_dict)
     brace_count = 0
     start_idx = -1
     
@@ -130,16 +131,17 @@ def extract_json(text: str) -> dict:
                 candidate = text[start_idx:i+1]
                 try:
                     obj = json.loads(candidate)
-                    json_objects.append(obj)
+                    json_objects.append((len(candidate), obj))
                 except json.JSONDecodeError:
                     pass
                 start_idx = -1
     
     if json_objects:
-        # Return the last valid JSON object (usually the final answer)
-        return json_objects[-1]
+        # Return the outermost (longest) valid JSON
+        json_objects.sort(key=lambda x: x[0], reverse=True)
+        return json_objects[0][1]
     
-    # Fallback: regex for simple key-value pairs
+    # Fallback: regex for simple key-value pairs (no nesting)
     matches = re.findall(r'\{[^{}]*\}', text)
     for match in reversed(matches):
         try:

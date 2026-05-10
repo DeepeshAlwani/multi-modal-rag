@@ -8,84 +8,45 @@ st.set_page_config(page_title="Multi-Modal RAG", page_icon="🤖", layout="wide"
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-TOKEN_KEY = "rag_session_token"
 API_URL = "http://localhost:8000"
 
 # ---------------------------------------------------------------------------
-# LocalStorage helpers via a tiny bidirectional HTML component
+# LocalStorage helpers via same-origin iframe
 # ---------------------------------------------------------------------------
 
-def _ls_get(key: str) -> str | None:
-    """
-    Inject a one-shot JS snippet that reads localStorage and writes the value
-    into a hidden Streamlit text component via postMessage.
-    We use st.session_state as a cache so we only do the async round-trip once
-    per browser session.
-    """
-    # We can't do true sync JS→Python in Streamlit, so we embed a self-contained
-    # component that reads the value and immediately posts it back via a query
-    # param redirect trick.  Instead, we use the simpler pattern:
-    # store the token in a hidden text_input whose default is injected by JS.
-    pass  # see _render_auth_bridge below
-
-
 def _render_auth_bridge():
-    """
-    Renders an invisible iframe (same-origin) that redirects parent window
-    with token as query parameter if token exists in localStorage.
-    Only rendered when no token in query params to avoid infinite redirect loops.
-    """
-    st.iframe(
-        "/static/auth-bridge.html",
-        height=1,
-        width=1,
-    )
-
+    st.iframe("/static/auth-bridge.html", height=1, width=1)
 
 def _save_token_to_browser(token: str):
-    """Write a token into the browser's localStorage via same-origin iframe."""
-    st.iframe(
-        f"/static/save-token.html?token={token}",
-        height=1,
-        width=1,
-    )
-
+    st.iframe(f"/static/save-token.html?token={token}", height=1, width=1)
 
 def _clear_token_from_browser():
-    """Remove the token from the browser's localStorage via same-origin iframe."""
-    st.iframe(
-        "/static/clear-token.html",
-        height=1,
-        width=1,
-    )
+    st.iframe("/static/clear-token.html", height=1, width=1)
 
 
 # ---------------------------------------------------------------------------
 # Session state initialisation
 # ---------------------------------------------------------------------------
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-if "token" not in st.session_state:
-    st.session_state.token = None
-if "user_email" not in st.session_state:
-    st.session_state.user_email = None
-if "repo_indexed" not in st.session_state:
-    st.session_state.repo_indexed = False
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-# Flag so we only attempt auto-login once per Streamlit session
-if "_checked_stored_token" not in st.session_state:
-    st.session_state._checked_stored_token = False
+defaults = {
+    "authenticated": False,
+    "token": None,
+    "user_email": None,
+    "repo_indexed": False,
+    "messages": [],
+    "_checked_stored_token": False,
+    "_active_job_id": None,   # job being polled
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 # ---------------------------------------------------------------------------
 # Persistent login: read token from localStorage on first load
 # ---------------------------------------------------------------------------
-# Check if token came via query param (from auth-bridge redirect after page reload)
 query_params = st.query_params
 stored_token = query_params.get("auth_token", "")
 
 if stored_token and not st.session_state._checked_stored_token:
-    # Validate the stored token against the API
     try:
         resp = requests.get(
             f"{API_URL}/repo_info",
@@ -93,25 +54,22 @@ if stored_token and not st.session_state._checked_stored_token:
             timeout=5,
         )
         if resp.status_code != 401:
-            # Token is still valid — restore session
             st.session_state.token = stored_token
             st.session_state.authenticated = True
             st.session_state.user_email = st.session_state.get("_stored_email", "")
-            # Check if they already have a repo indexed
             if resp.status_code == 200:
                 st.session_state.repo_indexed = True
     except Exception:
-        pass  # API not reachable; stay logged out
+        pass
     st.session_state._checked_stored_token = True
 
-# Render hidden iframe for future page reloads (only if no token in query params and not yet checked)
 if not stored_token and not st.session_state._checked_stored_token:
     _render_auth_bridge()
     st.session_state._checked_stored_token = True
 
 
 # ---------------------------------------------------------------------------
-# Helper: call logout endpoint and clear everything
+# Helper: logout
 # ---------------------------------------------------------------------------
 def do_logout():
     if st.session_state.token:
@@ -124,13 +82,48 @@ def do_logout():
         except Exception:
             pass
     _clear_token_from_browser()
-    st.session_state.authenticated = False
-    st.session_state.token = None
-    st.session_state.user_email = None
-    st.session_state.repo_indexed = False
-    st.session_state.messages = []
-    st.session_state._checked_stored_token = False
+    for k, v in defaults.items():
+        st.session_state[k] = v
     st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Helper: poll a clone job until done/failed, showing live progress
+# ---------------------------------------------------------------------------
+def _poll_job(job_id: str, status_placeholder) -> bool:
+    """
+    Polls /jobs/{job_id} until the job finishes.
+    Updates status_placeholder with progress messages.
+    Returns True if successful, False on failure.
+    """
+    headers = {"Authorization": f"Bearer {st.session_state.token}"}
+    for _ in range(300):       # max ~5 minutes at 1-second intervals
+        try:
+            resp = requests.get(f"{API_URL}/jobs/{job_id}", headers=headers, timeout=10)
+            if resp.status_code != 200:
+                status_placeholder.error(f"Job polling failed: {resp.status_code}")
+                return False
+
+            data = resp.json()
+            status = data.get("status", "")
+            message = data.get("message", "")
+
+            if status == "done":
+                status_placeholder.success(f"✅ {message}")
+                return True
+            elif status == "failed":
+                status_placeholder.error(f"❌ Failed: {message}")
+                return False
+            else:
+                status_placeholder.info(f"⏳ {message}")
+
+        except Exception as e:
+            status_placeholder.warning(f"Polling error (retrying…): {e}")
+
+        time.sleep(1)
+
+    status_placeholder.error("Timed out waiting for indexing to complete.")
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -160,9 +153,7 @@ if not st.session_state.authenticated:
                         st.session_state.authenticated = True
                         st.session_state.user_email = email
                         st.session_state._checked_stored_token = True
-                        # Persist token to browser localStorage
                         _save_token_to_browser(token)
-                        # Check if user already has a repo indexed from a previous session
                         try:
                             ri = requests.get(
                                 f"{API_URL}/repo_info",
@@ -215,32 +206,49 @@ else:
             st.subheader("📦 Step 1: Add GitHub Repository")
             repo_url = st.text_input(
                 "Public GitHub Repo URL",
-                placeholder="https://github.com/username/repo.git",
+                placeholder="https://github.com/username/repo",
             )
 
             if st.button("Clone & Index Repository"):
                 if repo_url:
-                    with st.spinner("Cloning and indexing repository… This may take a few minutes."):
-                        try:
-                            response = requests.post(
-                                f"{API_URL}/clone_repo",
-                                headers={"Authorization": f"Bearer {st.session_state.token}"},
-                                json={"repo_url": repo_url},
-                            )
-                            if response.status_code == 200:
+                    try:
+                        response = requests.post(
+                            f"{API_URL}/clone_repo",
+                            headers={"Authorization": f"Bearer {st.session_state.token}"},
+                            json={"repo_url": repo_url},
+                        )
+                        data = response.json()
+
+                        if response.status_code in (200, 202):
+                            # Already indexed (no job needed)
+                            if data.get("status") == "done" and not data.get("job_id"):
                                 st.session_state.repo_indexed = True
-                                st.success("Repository indexed successfully!")
+                                st.success("Repository already indexed!")
                                 st.rerun()
                             else:
-                                st.error(response.json().get("detail", "Failed"))
-                        except Exception as e:
-                            st.error(f"Error: {e}")
+                                # Background job started — poll for completion
+                                job_id = data.get("job_id")
+                                st.session_state._active_job_id = job_id
+                                st.rerun()
+                        else:
+                            st.error(data.get("detail", "Failed to start job"))
+                    except Exception as e:
+                        st.error(f"Error: {e}")
                 else:
                     st.warning("Please enter a repository URL")
+
+            # If a job is running, show live progress in the sidebar
+            if st.session_state._active_job_id:
+                status_box = st.empty()
+                success = _poll_job(st.session_state._active_job_id, status_box)
+                st.session_state._active_job_id = None
+                if success:
+                    st.session_state.repo_indexed = True
+                    st.rerun()
+
         else:
             st.success("✅ Repository indexed")
             if st.button("📂 Change Repository"):
-                # Tell the API to clear the active repo for this user
                 try:
                     requests.post(
                         f"{API_URL}/clear_repo",
@@ -275,11 +283,11 @@ else:
             if response.status_code == 200:
                 info = response.json()
                 with st.sidebar:
-                    st.markdown(f"**📊 Repository Stats:** {info['total_functions']} functions indexed")
+                    st.markdown(f"**📊 {info['total_functions']} functions indexed**")
                     if info.get("repo_url"):
                         st.caption(f"🔗 {info['repo_url']}")
                     with st.expander("📝 View Functions"):
-                        for func in info['functions'][:10]:
+                        for func in info["functions"][:10]:
                             st.code(
                                 f"{func['name']} ({func['file'].split('/')[-1]})",
                                 language="python",
